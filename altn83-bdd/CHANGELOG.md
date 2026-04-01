@@ -2,6 +2,19 @@
 
 ## 2026-04-01
 
+### Phase 1 - Conception et modélisation
+- ajout du livrable graphique MCD.png
+- MCD construit a partir du cahier des charges NanoOrbit et des regles de gestion de la phase 1
+- modelisation des associations porteuses d'attributs :
+  - `EMBARQUEMENT`
+  - `PARTICIPATION`
+  - `AFFECTATION_STATION`
+  - `FENETRE_COM`
+- prise en compte des points sensibles de la phase 1 :
+  - rattachement d'une station a un seul centre de controle
+  - distinction entre contraintes structurelles et contraintes procedurales
+  - identification des regles a sortir du MCD pour implementation en triggers
+
 ### Phase 2 - Schéma Oracle
 - ajout du script Phase2_DDL
 - creation des 11 tables du schema NanoOrbit :
