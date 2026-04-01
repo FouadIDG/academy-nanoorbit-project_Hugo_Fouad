@@ -1,0 +1,1 @@
+package fr.myefrei.nanoorbit.ui.detail
