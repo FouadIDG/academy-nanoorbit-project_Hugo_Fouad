@@ -11,7 +11,7 @@
   - `AFFECTATION_STATION`
   - `FENETRE_COM`
 - prise en compte des points sensibles de la phase 1 :
-  - rattachement d'une station a un seul centre de controle
+  - rattachement station-centre porte par une association dediee
   - distinction entre contraintes structurelles et contraintes procedurales
   - identification des regles a sortir du MCD pour implementation en triggers
 
@@ -36,7 +36,8 @@
 - ajout du script Phase2_DML
 - chargement du jeu de donnees initial en suivant le PDF de reference
 - choix retenus pour le DML :
-  - 2 centres seulement au chargement initial : Paris et Houston
+  - 2 centres charges : Paris et Houston
+  - `AFFECTATION_STATION` utilisee pour relier les stations a leur centre
   - `GS-SGP-01` rattachee a Houston
   - pas d'insertion manuelle dans `HISTORIQUE_STATUT`
 

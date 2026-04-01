@@ -53,7 +53,7 @@ ORDER BY name, sequence;
 
 SELECT 'AFFECTATION_STATION' AS table_name, COUNT(*) AS nb FROM affectation_station
 UNION ALL
-SELECT 'CENTRE_CONTROLE', COUNT(*) FROM centre_controle
+SELECT 'CENTRE_CONTROLE' AS table_name, COUNT(*) AS nb FROM centre_controle
 UNION ALL
 SELECT 'EMBARQUEMENT', COUNT(*) FROM embarquement
 UNION ALL

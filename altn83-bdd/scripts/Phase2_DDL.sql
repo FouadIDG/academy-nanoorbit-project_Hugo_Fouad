@@ -104,8 +104,7 @@ CREATE TABLE affectation_station (
     date_affectation DATE NOT NULL,
     CONSTRAINT pk_affectation_station PRIMARY KEY (id_centre, code_station),
     CONSTRAINT fk_aff_centre FOREIGN KEY (id_centre) REFERENCES centre_controle (id_centre),
-    CONSTRAINT fk_aff_station FOREIGN KEY (code_station) REFERENCES station_sol (code_station),
-    CONSTRAINT uq_affectation_station UNIQUE (code_station)
+    CONSTRAINT fk_aff_station FOREIGN KEY (code_station) REFERENCES station_sol (code_station)
 );
 
 CREATE TABLE mission (
