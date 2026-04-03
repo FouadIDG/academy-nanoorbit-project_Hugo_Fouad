@@ -21,10 +21,10 @@
 - fichiers CSV de reference fournis avec le sujet
 - `07_AFFECTATION_STATION.csv` est utilise dans le jeu de donnees du modele actuel
 ### `scripts/`
-- `Phase2_DDL.sql` : creation du schema Oracle
-- `Phase2_DML.sql` : chargement du jeu de donnees initial
-- `Phase2_Triggers.sql` : creation des triggers metier
-- `Phase2_Controle.sql` : verifications schema + donnees + triggers
+- `01-Phase2_DDL.sql` : creation du schema Oracle
+- `02-Phase2_DML.sql` : chargement du jeu de donnees initial
+- `03-Phase2_Triggers.sql` : creation des triggers metier
+- `04-Phase2_Controle.sql` : verifications schema + donnees + triggers
 
 ### Autres livrables
 - `MCD.png` : schema graphique du MCD
