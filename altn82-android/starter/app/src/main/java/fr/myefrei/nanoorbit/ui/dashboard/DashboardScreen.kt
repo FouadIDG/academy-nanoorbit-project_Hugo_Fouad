@@ -1,6 +1,7 @@
 package fr.myefrei.nanoorbit.ui.dashboard
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -9,8 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -18,46 +23,62 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.myefrei.nanoorbit.data.mock.MockData
 import fr.myefrei.nanoorbit.data.models.Satellite
 import fr.myefrei.nanoorbit.data.models.StatutSatellite
 import fr.myefrei.nanoorbit.ui.components.SatelliteCard
 import fr.myefrei.nanoorbit.ui.theme.NanoOrbitTheme
-import kotlinx.coroutines.delay
+import fr.myefrei.nanoorbit.viewmodel.NanoOrbitViewModel
+
+@Composable
+fun DashboardScreen(
+    modifier: Modifier = Modifier,
+    viewModel: NanoOrbitViewModel = viewModel()
+) {
+    val satellites by viewModel.filteredSatellites.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val selectedStatut by viewModel.selectedStatut.collectAsStateWithLifecycle()
+
+    DashboardContent(
+        modifier = modifier,
+        satellites = satellites,
+        isLoading = isLoading,
+        errorMessage = errorMessage,
+        searchQuery = searchQuery,
+        selectedStatut = selectedStatut,
+        onSearchQueryChange = viewModel::onSearchQueryChange,
+        onStatutFilterChange = viewModel::onStatutFilterChange,
+        onRetry = viewModel::refreshSatellites
+    )
+}
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-fun DashboardScreen(
+private fun DashboardContent(
     modifier: Modifier = Modifier,
-    satellites: List<Satellite> = MockData.satellites
+    satellites: List<Satellite>,
+    isLoading: Boolean,
+    errorMessage: String?,
+    searchQuery: String,
+    selectedStatut: StatutSatellite?,
+    onSearchQueryChange: (String) -> Unit,
+    onStatutFilterChange: (StatutSatellite?) -> Unit,
+    onRetry: () -> Unit
 ) {
-    var searchQuery by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(true) }
-
-    LaunchedEffect(Unit) {
-        delay(500)
-        isLoading = false
+    val nbOperationnels = satellites.count { satellite ->
+        satellite.statut == StatutSatellite.OPERATIONNEL
     }
-
-    val filteredSatellites = remember(searchQuery, satellites) {
-        satellites.filter { satellite ->
-            val orbite = MockData.orbitesById[satellite.idOrbite]
-            satellite.nomSatellite.contains(searchQuery, ignoreCase = true) ||
-                satellite.idSatellite.contains(searchQuery, ignoreCase = true) ||
-                orbite?.typeOrbite?.libelleOracle?.contains(searchQuery, ignoreCase = true) == true
-        }
-    }
-    val nbOperationnels = filteredSatellites.count { it.statut == StatutSatellite.OPERATIONNEL }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -76,71 +97,156 @@ fun DashboardScreen(
             )
         }
     ) { innerPadding ->
-        if (isLoading) {
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+                .padding(horizontal = 20.dp)
+        ) {
+            TextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text(text = "Rechercher un satellite ou une orbite") },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+                    unfocusedIndicatorColor = MaterialTheme.colorScheme.outline
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            StatusFilterBar(
+                selectedStatut = selectedStatut,
+                onStatutFilterChange = onStatutFilterChange
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "$nbOperationnels/${satellites.size} satellites opérationnels",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Text(
+                text = "${satellites.size} résultat(s)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            when {
+                isLoading -> LoadingState()
+                errorMessage != null -> ErrorState(
+                    message = errorMessage,
+                    onRetry = onRetry
+                )
+                else -> SatelliteList(satellites = satellites)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusFilterBar(
+    selectedStatut: StatutSatellite?,
+    onStatutFilterChange: (StatutSatellite?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            FilterChip(
+                selected = selectedStatut == null,
+                onClick = { onStatutFilterChange(null) },
+                label = { Text(text = "Tous") }
+            )
+        }
+
+        items(StatutSatellite.entries) { statut ->
+            FilterChip(
+                selected = selectedStatut == statut,
+                onClick = { onStatutFilterChange(statut) },
+                label = { Text(text = statut.libelleOracle) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SatelliteList(
+    satellites: List<Satellite>,
+    modifier: Modifier = Modifier
+) {
+    // Q1: LazyColumn compose uniquement les éléments visibles et recycle la mesure pendant
+    // le scroll. Avec Column, 100 satellites seraient tous composés d'un coup, ce qui
+    // augmente le coût CPU, la mémoire et peut provoquer des saccades ou un premier rendu lent.
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        items(
+            items = satellites,
+            key = { satellite -> satellite.idSatellite }
+        ) { satellite ->
+            SatelliteCard(
+                satellite = satellite,
+                onClick = {
+                    // Navigation vers l'écran détail prévue en phase 3.
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoadingState(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(top = 80.dp),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator()
+            Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = "Chargement de la constellation NanoOrbit...",
-                modifier = Modifier.padding(innerPadding).padding(24.dp),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        } else {
-            Column(
-                modifier = Modifier
-                    .padding(innerPadding)
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp)
-            ) {
-                TextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text(text = "Rechercher un satellite ou une orbite") },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        focusedIndicatorColor = MaterialTheme.colorScheme.primary,
-                        unfocusedIndicatorColor = MaterialTheme.colorScheme.outline
-                    )
-                )
+        }
+    }
+}
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "$nbOperationnels/${filteredSatellites.size} satellites opérationnels",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                Text(
-                    text = "${filteredSatellites.size} résultat(s)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Q1: LazyColumn compose uniquement les éléments visibles et recycle la mesure pendant
-                // le scroll. Avec Column, 100 satellites seraient tous composés d'un coup, ce qui
-                // augmente le coût CPU, la mémoire et peut provoquer des saccades ou un premier rendu lent.
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    items(
-                        items = filteredSatellites,
-                        key = { satellite -> satellite.idSatellite }
-                    ) { satellite ->
-                        SatelliteCard(
-                            satellite = satellite,
-                            onClick = {
-                                // Navigation vers l'écran détail prévue en phase 3.
-                            }
-                        )
-                    }
-                }
-            }
+@Composable
+private fun ErrorState(
+    message: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.error
+        )
+        Button(onClick = onRetry) {
+            Text(text = "Réessayer")
         }
     }
 }
@@ -149,6 +255,15 @@ fun DashboardScreen(
 @Composable
 private fun DashboardScreenPreview() {
     NanoOrbitTheme {
-        DashboardScreen()
+        DashboardContent(
+            satellites = MockData.satellites,
+            isLoading = false,
+            errorMessage = null,
+            searchQuery = "",
+            selectedStatut = null,
+            onSearchQueryChange = {},
+            onStatutFilterChange = {},
+            onRetry = {}
+        )
     }
 }
