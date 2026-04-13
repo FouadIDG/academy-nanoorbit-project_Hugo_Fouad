@@ -13,8 +13,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -40,9 +45,11 @@ import java.util.Locale
 fun SatelliteCard(
     satellite: Satellite,
     modifier: Modifier = Modifier,
+    orbiteLabel: String = "Orbite inconnue",
+    isFavorite: Boolean = false,
+    onFavoriteClick: () -> Unit = {},
     onClick: () -> Unit
 ) {
-    val orbite = MockData.orbitesById[satellite.idOrbite]
     val isDesorbite = satellite.statut == StatutSatellite.DESORBITE
 
     Card(
@@ -83,15 +90,32 @@ fun SatelliteCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                StatusBadge(statut = satellite.statut)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onFavoriteClick) {
+                        Icon(
+                            imageVector = if (isFavorite) {
+                                Icons.Filled.Star
+                            } else {
+                                Icons.Outlined.StarBorder
+                            },
+                            contentDescription = if (isFavorite) {
+                                "Retirer des favoris"
+                            } else {
+                                "Ajouter aux favoris"
+                            },
+                            tint = if (isFavorite) {
+                                Color(0xFFF9A825)
+                            } else {
+                                MaterialTheme.colorScheme.outline
+                            }
+                        )
+                    }
+                    StatusBadge(statut = satellite.statut)
+                }
             }
 
             Text(
-                text = if (orbite == null) {
-                    "Orbite inconnue"
-                } else {
-                    "${orbite.typeOrbite.libelleOracle} · ${orbite.altitudeKm} km · ${orbite.zoneCouverture}"
-                },
+                text = orbiteLabel,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -152,6 +176,10 @@ fun FenetreCard(
     modifier: Modifier = Modifier
 ) {
     val formatter = DateTimeFormatter.ofPattern("dd MMM yyyy · HH:mm", Locale.FRENCH)
+    val satelliteLabel = fenetre.nomSatellite?.let { nomSatellite ->
+        "$nomSatellite (${fenetre.idSatellite})"
+    } ?: fenetre.idSatellite
+    val dureeLabel = fenetre.dureeFormatee ?: formatDuration(fenetre.dureeSecondes)
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -176,10 +204,18 @@ fun FenetreCard(
             }
 
             Text(
-                text = "$nomStation · ${formatDuration(fenetre.dureeSecondes)} · ${fenetre.idSatellite}",
+                text = "$nomStation · $dureeLabel · $satelliteLabel",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            fenetre.nomCentre?.let { nomCentre ->
+                Text(
+                    text = "Centre de contrôle : $nomCentre",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             fenetre.volumeDonneesMb?.let { volume ->
                 Text(
@@ -251,6 +287,48 @@ fun InstrumentItem(
 }
 
 @Composable
+fun CacheStatusBanner(
+    title: String = "Mode hors-ligne",
+    cacheAgeLabel: String?,
+    isMockMode: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = if (isMockMode) {
+            MaterialTheme.colorScheme.tertiaryContainer
+        } else {
+            MaterialTheme.colorScheme.errorContainer
+        },
+        contentColor = if (isMockMode) {
+            MaterialTheme.colorScheme.onTertiaryContainer
+        } else {
+            MaterialTheme.colorScheme.onErrorContainer
+        }
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = cacheAgeLabel ?: if (isMockMode) {
+                    "Données locales MockData"
+                } else {
+                    "Données locales Room"
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
 private fun FenetreStatusBadge(
     statut: StatutFenetre,
     modifier: Modifier = Modifier
@@ -288,6 +366,7 @@ private fun SatelliteCardPreview() {
     NanoOrbitTheme {
         SatelliteCard(
             satellite = MockData.satellites.first(),
+            orbiteLabel = "SSO · 550 km · Polaire globale — Europe / Arctique",
             modifier = Modifier.padding(16.dp),
             onClick = {}
         )

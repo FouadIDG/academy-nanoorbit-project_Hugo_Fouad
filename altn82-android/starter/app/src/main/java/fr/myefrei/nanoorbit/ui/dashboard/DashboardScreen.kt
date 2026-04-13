@@ -23,6 +23,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -33,8 +34,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.myefrei.nanoorbit.data.mock.MockData
+import fr.myefrei.nanoorbit.data.models.Orbite
 import fr.myefrei.nanoorbit.data.models.Satellite
 import fr.myefrei.nanoorbit.data.models.StatutSatellite
+import fr.myefrei.nanoorbit.ui.components.CacheStatusBanner
 import fr.myefrei.nanoorbit.ui.components.SatelliteCard
 import fr.myefrei.nanoorbit.ui.theme.NanoOrbitTheme
 import fr.myefrei.nanoorbit.viewmodel.NanoOrbitViewModel
@@ -42,24 +45,41 @@ import fr.myefrei.nanoorbit.viewmodel.NanoOrbitViewModel
 @Composable
 fun DashboardScreen(
     modifier: Modifier = Modifier,
-    viewModel: NanoOrbitViewModel = viewModel()
+    contentPadding: PaddingValues = PaddingValues(),
+    viewModel: NanoOrbitViewModel = viewModel(),
+    onSatelliteClick: (String) -> Unit = {}
 ) {
     val satellites by viewModel.filteredSatellites.collectAsStateWithLifecycle()
+    val orbites by viewModel.orbites.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedStatut by viewModel.selectedStatut.collectAsStateWithLifecycle()
+    val isCacheMode by viewModel.isSatelliteCacheMode.collectAsStateWithLifecycle()
+    val isMockMode by viewModel.isSatelliteMockMode.collectAsStateWithLifecycle()
+    val cacheAgeLabel by viewModel.satelliteCacheAgeLabel.collectAsStateWithLifecycle()
+    val favoriteSatelliteIds by viewModel.favoriteSatelliteIds.collectAsStateWithLifecycle()
+    val showFavoritesOnly by viewModel.showFavoritesOnly.collectAsStateWithLifecycle()
 
     DashboardContent(
-        modifier = modifier,
+        modifier = modifier.padding(contentPadding),
         satellites = satellites,
+        orbitesById = orbites.associateBy { orbite -> orbite.idOrbite },
         isLoading = isLoading,
         errorMessage = errorMessage,
         searchQuery = searchQuery,
         selectedStatut = selectedStatut,
+        isCacheMode = isCacheMode,
+        isMockMode = isMockMode,
+        cacheAgeLabel = cacheAgeLabel,
+        favoriteSatelliteIds = favoriteSatelliteIds,
+        showFavoritesOnly = showFavoritesOnly,
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onStatutFilterChange = viewModel::onStatutFilterChange,
-        onRetry = viewModel::refreshSatellites
+        onShowFavoritesOnlyChange = viewModel::onShowFavoritesOnlyChange,
+        onToggleFavorite = viewModel::toggleFavoriteSatellite,
+        onRetry = viewModel::refreshSatellites,
+        onSatelliteClick = onSatelliteClick
     )
 }
 
@@ -68,13 +88,22 @@ fun DashboardScreen(
 private fun DashboardContent(
     modifier: Modifier = Modifier,
     satellites: List<Satellite>,
+    orbitesById: Map<Int, Orbite>,
     isLoading: Boolean,
     errorMessage: String?,
     searchQuery: String,
     selectedStatut: StatutSatellite?,
+    isCacheMode: Boolean,
+    isMockMode: Boolean,
+    cacheAgeLabel: String?,
+    favoriteSatelliteIds: Set<String>,
+    showFavoritesOnly: Boolean,
     onSearchQueryChange: (String) -> Unit,
     onStatutFilterChange: (StatutSatellite?) -> Unit,
-    onRetry: () -> Unit
+    onShowFavoritesOnlyChange: (Boolean) -> Unit,
+    onToggleFavorite: (String) -> Unit,
+    onRetry: () -> Unit,
+    onSatelliteClick: (String) -> Unit
 ) {
     val nbOperationnels = satellites.count { satellite ->
         satellite.statut == StatutSatellite.OPERATIONNEL
@@ -97,56 +126,80 @@ private fun DashboardContent(
             )
         }
     ) { innerPadding ->
-        Column(
+        PullToRefreshBox(
+            isRefreshing = isLoading,
+            onRefresh = onRetry,
             modifier = Modifier
                 .padding(innerPadding)
                 .fillMaxSize()
-                .padding(horizontal = 20.dp)
         ) {
-            TextField(
-                value = searchQuery,
-                onValueChange = onSearchQueryChange,
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                label = { Text(text = "Rechercher un satellite ou une orbite") },
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    focusedIndicatorColor = MaterialTheme.colorScheme.primary,
-                    unfocusedIndicatorColor = MaterialTheme.colorScheme.outline
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp)
+            ) {
+                TextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(text = "Rechercher un satellite ou une orbite") },
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+                        unfocusedIndicatorColor = MaterialTheme.colorScheme.outline
+                    )
                 )
-            )
 
-            Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-            StatusFilterBar(
-                selectedStatut = selectedStatut,
-                onStatutFilterChange = onStatutFilterChange
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = "$nbOperationnels/${satellites.size} satellites opérationnels",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Text(
-                text = "${satellites.size} résultat(s)",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            when {
-                isLoading -> LoadingState()
-                errorMessage != null -> ErrorState(
-                    message = errorMessage,
-                    onRetry = onRetry
+                StatusFilterBar(
+                    selectedStatut = selectedStatut,
+                    showFavoritesOnly = showFavoritesOnly,
+                    onStatutFilterChange = onStatutFilterChange,
+                    onShowFavoritesOnlyChange = onShowFavoritesOnlyChange
                 )
-                else -> SatelliteList(satellites = satellites)
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (isCacheMode || isMockMode) {
+                    CacheStatusBanner(
+                        title = if (isMockMode) "Mode démonstration" else "Mode hors-ligne",
+                        cacheAgeLabel = cacheAgeLabel,
+                        isMockMode = isMockMode
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                Text(
+                    text = "$nbOperationnels/${satellites.size} satellites opérationnels",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Text(
+                    text = "${satellites.size} résultat(s)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                when {
+                    isLoading -> LoadingState()
+                    errorMessage != null && satellites.isEmpty() -> ErrorState(
+                        message = errorMessage,
+                        onRetry = onRetry
+                    )
+                    else -> SatelliteList(
+                        satellites = satellites,
+                        orbitesById = orbitesById,
+                        favoriteSatelliteIds = favoriteSatelliteIds,
+                        onToggleFavorite = onToggleFavorite,
+                        onSatelliteClick = onSatelliteClick
+                    )
+                }
             }
         }
     }
@@ -155,7 +208,9 @@ private fun DashboardContent(
 @Composable
 private fun StatusFilterBar(
     selectedStatut: StatutSatellite?,
+    showFavoritesOnly: Boolean,
     onStatutFilterChange: (StatutSatellite?) -> Unit,
+    onShowFavoritesOnlyChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyRow(
@@ -167,6 +222,14 @@ private fun StatusFilterBar(
                 selected = selectedStatut == null,
                 onClick = { onStatutFilterChange(null) },
                 label = { Text(text = "Tous") }
+            )
+        }
+
+        item {
+            FilterChip(
+                selected = showFavoritesOnly,
+                onClick = { onShowFavoritesOnlyChange(!showFavoritesOnly) },
+                label = { Text(text = "Favoris") }
             )
         }
 
@@ -183,7 +246,11 @@ private fun StatusFilterBar(
 @Composable
 private fun SatelliteList(
     satellites: List<Satellite>,
-    modifier: Modifier = Modifier
+    orbitesById: Map<Int, Orbite>,
+    favoriteSatelliteIds: Set<String>,
+    onToggleFavorite: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    onSatelliteClick: (String) -> Unit
 ) {
     // Q1: LazyColumn compose uniquement les éléments visibles et recycle la mesure pendant
     // le scroll. Avec Column, 100 satellites seraient tous composés d'un coup, ce qui
@@ -197,10 +264,16 @@ private fun SatelliteList(
             items = satellites,
             key = { satellite -> satellite.idSatellite }
         ) { satellite ->
+            val orbite = orbitesById[satellite.idOrbite]
             SatelliteCard(
                 satellite = satellite,
+                orbiteLabel = orbite?.let { item ->
+                    "${item.typeOrbite.libelleOracle} · ${item.altitudeKm} km · ${item.zoneCouverture}"
+                } ?: "Orbite inconnue",
+                isFavorite = satellite.idSatellite in favoriteSatelliteIds,
+                onFavoriteClick = { onToggleFavorite(satellite.idSatellite) },
                 onClick = {
-                    // Navigation vers l'écran détail prévue en phase 3.
+                    onSatelliteClick(satellite.idSatellite)
                 }
             )
         }
@@ -257,13 +330,22 @@ private fun DashboardScreenPreview() {
     NanoOrbitTheme {
         DashboardContent(
             satellites = MockData.satellites,
+            orbitesById = MockData.orbitesById,
             isLoading = false,
             errorMessage = null,
             searchQuery = "",
             selectedStatut = null,
+            isCacheMode = true,
+            isMockMode = false,
+            cacheAgeLabel = "Mis à jour il y a 3 min",
+            favoriteSatelliteIds = setOf("SAT-001", "SAT-003"),
+            showFavoritesOnly = false,
             onSearchQueryChange = {},
             onStatutFilterChange = {},
-            onRetry = {}
+            onShowFavoritesOnlyChange = {},
+            onToggleFavorite = {},
+            onRetry = {},
+            onSatelliteClick = {}
         )
     }
 }

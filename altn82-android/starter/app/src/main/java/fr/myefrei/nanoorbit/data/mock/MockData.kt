@@ -7,6 +7,7 @@ import fr.myefrei.nanoorbit.data.models.FormatCubeSat
 import fr.myefrei.nanoorbit.data.models.Instrument
 import fr.myefrei.nanoorbit.data.models.Mission
 import fr.myefrei.nanoorbit.data.models.Orbite
+import fr.myefrei.nanoorbit.data.models.ParticipationMission
 import fr.myefrei.nanoorbit.data.models.Satellite
 import fr.myefrei.nanoorbit.data.models.StatutFenetre
 import fr.myefrei.nanoorbit.data.models.StatutMission
@@ -305,6 +306,44 @@ object MockData {
             refInstrument = "INS-AIS-01",
             dateIntegration = LocalDate.of(2021, 11, 20),
             etatFonctionnement = EtatFonctionnementInstrument.HORS_SERVICE
+        )
+    )
+
+    val participations = listOf(
+        ParticipationMission(
+            idSatellite = "SAT-001",
+            idMission = "MSN-ARC-2023",
+            roleSatellite = "Imageur principal"
+        ),
+        ParticipationMission(
+            idSatellite = "SAT-002",
+            idMission = "MSN-ARC-2023",
+            roleSatellite = "Imageur secondaire"
+        ),
+        ParticipationMission(
+            idSatellite = "SAT-003",
+            idMission = "MSN-ARC-2023",
+            roleSatellite = "Satellite de relais"
+        ),
+        ParticipationMission(
+            idSatellite = "SAT-001",
+            idMission = "MSN-DEF-2022",
+            roleSatellite = "Imageur principal"
+        ),
+        ParticipationMission(
+            idSatellite = "SAT-005",
+            idMission = "MSN-DEF-2022",
+            roleSatellite = "Imageur secondaire"
+        ),
+        ParticipationMission(
+            idSatellite = "SAT-003",
+            idMission = "MSN-COAST-2024",
+            roleSatellite = "Imageur principal"
+        ),
+        ParticipationMission(
+            idSatellite = "SAT-004",
+            idMission = "MSN-COAST-2024",
+            roleSatellite = "Satellite de secours"
         )
     )
 }

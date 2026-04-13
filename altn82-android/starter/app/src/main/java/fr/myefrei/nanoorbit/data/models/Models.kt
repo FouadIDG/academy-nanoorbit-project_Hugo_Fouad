@@ -1,5 +1,6 @@
 package fr.myefrei.nanoorbit.data.models
 
+import com.google.gson.annotations.SerializedName
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -10,9 +11,13 @@ import java.time.LocalDateTime
  * exact du CHECK Oracle et permet au compilateur d'imposer le traitement de tous les cas UI.
  */
 enum class StatutSatellite(val libelleOracle: String) {
+    @SerializedName("Opérationnel")
     OPERATIONNEL("Opérationnel"),
+    @SerializedName("En veille")
     EN_VEILLE("En veille"),
+    @SerializedName("Défaillant")
     DEFAILLANT("Défaillant"),
+    @SerializedName("Désorbité")
     DESORBITE("Désorbité")
 }
 
@@ -20,9 +25,13 @@ enum class StatutSatellite(val libelleOracle: String) {
  * Enum miroir de SATELLITE.format_cubesat et du CHECK Oracle chk_satellite_format.
  */
 enum class FormatCubeSat(val libelleOracle: String) {
+    @SerializedName("1U")
     U1("1U"),
+    @SerializedName("3U")
     U3("3U"),
+    @SerializedName("6U")
     U6("6U"),
+    @SerializedName("12U")
     U12("12U")
 }
 
@@ -30,9 +39,13 @@ enum class FormatCubeSat(val libelleOracle: String) {
  * Enum miroir de ORBITE.type_orbite et du CHECK Oracle chk_orbite_type.
  */
 enum class TypeOrbite(val libelleOracle: String) {
+    @SerializedName("LEO")
     LEO("LEO"),
+    @SerializedName("MEO")
     MEO("MEO"),
+    @SerializedName("SSO")
     SSO("SSO"),
+    @SerializedName("GEO")
     GEO("GEO")
 }
 
@@ -40,8 +53,11 @@ enum class TypeOrbite(val libelleOracle: String) {
  * Enum miroir de FENETRE_COM.statut et du CHECK Oracle chk_fenetre_statut.
  */
 enum class StatutFenetre(val libelleOracle: String) {
+    @SerializedName("Planifiée")
     PLANIFIEE("Planifiée"),
+    @SerializedName("Réalisée")
     REALISEE("Réalisée"),
+    @SerializedName("Annulée")
     ANNULEE("Annulée")
 }
 
@@ -49,8 +65,11 @@ enum class StatutFenetre(val libelleOracle: String) {
  * Enum miroir de STATION_SOL.statut et du CHECK Oracle chk_station_statut.
  */
 enum class StatutStation(val libelleOracle: String) {
+    @SerializedName("Active")
     ACTIVE("Active"),
+    @SerializedName("Maintenance")
     MAINTENANCE("Maintenance"),
+    @SerializedName("Inactive")
     INACTIVE("Inactive")
 }
 
@@ -58,7 +77,9 @@ enum class StatutStation(val libelleOracle: String) {
  * Enum miroir de MISSION.statut_mission et du CHECK Oracle chk_mission_statut.
  */
 enum class StatutMission(val libelleOracle: String) {
+    @SerializedName("Active")
     ACTIVE("Active"),
+    @SerializedName("Terminée")
     TERMINEE("Terminée")
 }
 
@@ -66,8 +87,11 @@ enum class StatutMission(val libelleOracle: String) {
  * Enum miroir de EMBARQUEMENT.etat_fonctionnement et du CHECK Oracle chk_emb_etat.
  */
 enum class EtatFonctionnementInstrument(val libelleOracle: String) {
+    @SerializedName("Nominal")
     NOMINAL("Nominal"),
+    @SerializedName("Dégradé")
     DEGRADE("Dégradé"),
+    @SerializedName("Hors service")
     HORS_SERVICE("Hors service")
 }
 
@@ -116,6 +140,21 @@ data class Satellite(
 )
 
 /**
+ * Vue V_SATELLITES_OPERATIONNELS
+ * - nom_orbite -> nomOrbite
+ * - nb_instruments_embarques -> nbInstrumentsEmbarques
+ * - statut_batterie -> statutBatterie
+ */
+data class SatelliteOperationnelSummary(
+    val idSatellite: String,
+    val nomSatellite: String,
+    val nomOrbite: String,
+    val nbInstrumentsEmbarques: Int,
+    val statutBatterie: String,
+    val capaciteBatterieWh: Double
+)
+
+/**
  * Table INSTRUMENT
  * - ref_instrument -> refInstrument
  * - type_instrument -> typeInstrument
@@ -143,16 +182,30 @@ data class Instrument(
  * - statut -> statut
  * - id_satellite -> idSatellite
  * - code_station -> codeStation
+ *
+ * Colonnes enrichies issues de V_FENETRES_DETAIL
+ * - nom_satellite -> nomSatellite
+ * - nom_station -> nomStation
+ * - id_centre -> idCentre
+ * - nom_centre -> nomCentre
+ * - debut_formate -> debutFormate
+ * - duree_formatee -> dureeFormatee
  */
 data class FenetreCom(
     val idFenetre: Int,
     val datetimeDebut: LocalDateTime,
+    val debutFormate: String? = null,
     val dureeSecondes: Int,
+    val dureeFormatee: String? = null,
     val elevationMaxDegres: Double,
     val volumeDonneesMb: Double?,
     val statut: StatutFenetre,
     val idSatellite: String,
-    val codeStation: String
+    val nomSatellite: String? = null,
+    val codeStation: String,
+    val nomStation: String? = null,
+    val idCentre: Int? = null,
+    val nomCentre: String? = null
 )
 
 /**
@@ -198,6 +251,30 @@ data class Mission(
 )
 
 /**
+ * Vue V_STATS_MISSIONS
+ */
+data class MissionStats(
+    val idMission: String,
+    val nomMission: String,
+    val statutMission: StatutMission,
+    val nbSatellites: Int,
+    val typesOrbitesRepresentes: String,
+    val volumeTotalTelechargeMb: Double
+)
+
+/**
+ * Vue materialisee MV_VOLUMES_MENSUELS
+ */
+data class VolumeMensuel(
+    val moisReference: LocalDate,
+    val idCentre: Int?,
+    val nomCentre: String?,
+    val typeSatellite: FormatCubeSat,
+    val nbFenetresRealisees: Int,
+    val volumeTotalMb: Double
+)
+
+/**
  * Table EMBARQUEMENT
  * - id_satellite -> idSatellite
  * - ref_instrument -> refInstrument
@@ -209,4 +286,26 @@ data class EmbarquementInstrument(
     val refInstrument: String,
     val dateIntegration: LocalDate,
     val etatFonctionnement: EtatFonctionnementInstrument
+)
+
+/**
+ * Table PARTICIPATION
+ * - id_satellite -> idSatellite
+ * - id_mission -> idMission
+ * - role_satellite -> roleSatellite
+ */
+data class ParticipationMission(
+    val idSatellite: String,
+    val idMission: String,
+    val roleSatellite: String
+)
+
+data class SatelliteInstrument(
+    val instrument: Instrument,
+    val etatFonctionnement: EtatFonctionnementInstrument
+)
+
+data class SatelliteMissionAssignment(
+    val mission: Mission,
+    val roleSatellite: String
 )
