@@ -96,8 +96,6 @@ class CommunicationWindowNotificationWorker(
         private const val NOTIFICATION_ID_BASE = 10_000
 
         fun createNotificationChannel(context: Context) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 CHANNEL_NAME,
