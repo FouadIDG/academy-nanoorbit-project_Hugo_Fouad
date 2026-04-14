@@ -1,145 +1,133 @@
-# 🛰️ NanoOrbit — Projet EFREI Bordeaux S8
+# NanoOrbit Ground Control
 
-> **Modules concernés :** ALTN83 — Bases de données réparties · ALTN82 — Développement Mobile Android  
-> **Niveau :** 2ème année cycle ingénieur (Semestre 8)  
-> **Campus :** EFREI — Bordeaux  
-> **Année :** 2025–2026
+## Lancer le projet
 
----
-
-## 🌍 Contexte
-
-NanoOrbit est une startup fictive qui exploite une constellation de **CubeSats** pour surveiller des zones climatiques sensibles : déforestation, fonte des glaces, qualité de l'air, évolution du trait de côte.
-
-Ce dépôt regroupe l'ensemble des ressources pédagogiques du projet fil rouge NanoOrbit, commun aux deux modules ALTN83 et ALTN82. Les deux projets sont **intentionnellement cohérents** : mêmes entités, mêmes identifiants, mêmes règles métier.
-
----
-
-## 🗂️ Structure du dépôt
-
-```
-nanoorbit/
-├── README.md                        ← ce fichier
-├── .gitignore
-│
-├── altn83-bdd/                      ← Module Bases de données réparties
-│   ├── README.md
-│   ├── sujets/                      ← Énoncés des 4 phases
-│   │   ├── ALTN83_NanoOrbit_Projet_Fil_Rouge.pdf
-│   │   ├── ALTN83_NanoOrbit_CDC_Phase1.pdf
-│   │   └── ALTN83_NanoOrbit_AnnexeA_Donnees_Reference.pdf
-│   ├── donnees/                     ← Jeu de données de référence (CSV)
-│   │   ├── ALTN83_NanoOrbit_01_ORBITE.csv
-│   │   ├── ALTN83_NanoOrbit_02_SATELLITE.csv
-│   │   ├── ALTN83_NanoOrbit_03_INSTRUMENT.csv
-│   │   ├── ALTN83_NanoOrbit_04_EMBARQUEMENT.csv
-│   │   ├── ALTN83_NanoOrbit_05_CENTRE_CONTROLE.csv
-│   │   ├── ALTN83_NanoOrbit_06_STATION_SOL.csv
-│   │   ├── ALTN83_NanoOrbit_07_AFFECTATION_STATION.csv
-│   │   ├── ALTN83_NanoOrbit_08_MISSION.csv
-│   │   ├── ALTN83_NanoOrbit_09_FENETRE_COM.csv
-│   │   └── ALTN83_NanoOrbit_10_PARTICIPATION.csv
-│   └── scripts/                     ← Scripts SQL Oracle
-│       ├── ALTN83_NanoOrbit_Phase2_DML.sql
-│       └── ALTN83_NanoOrbit_Memo_SQL_PLSQL.pdf
-│
-└── altn82-android/                  ← Module Développement Mobile Android
-    ├── README.md
-    ├── sujets/                      ← Énoncés des TPs
-    │   ├── ALTN82_TP01_Android.pdf
-    │   ├── ALTN82_TP02_BordeauxVeloLib.pdf
-    │   ├── ALTN82_TP03_MVVM_Navigation.pdf
-    │   ├── ALTN82_TP04_Cartographie.pdf
-    │   └── ALTN82_NanoOrbit_Projet_Android.pdf
-    └── starter/                     ← Projet Android de démarrage
-        └── README.md
-```
-
----
-
-## 🔗 Synergie entre les deux modules
-
-| Point de cohérence | ALTN83 — Oracle | ALTN82 — Android |
-|---|---|---|
-| **Modèles de données** | Table `SATELLITE` avec types Oracle | `data class Satellite` en Kotlin |
-| **Règle RG-F04** | `CHECK (duree BETWEEN 1 AND 900)` | Validation côté client avant envoi |
-| **Règle RG-S06** | Trigger `trg_valider_fenetre` (ORA-20001) | Message d'erreur affiché dans l'UI |
-| **Mode hors-ligne** | Q3 Phase 1 : continuité si serveur indisponible | Room Cache-First + bannière offline |
-
----
-
-## 📦 Jeu de données de référence
-
-Les **10 fichiers CSV** dans `altn83-bdd/donnees/` constituent le jeu de données commun aux deux modules. Tous les exercices des Phases 2, 3 et 4 référencent ces identifiants.
-
-| # | Table | Lignes | Points clés |
-|---|---|---|---|
-| 01 | `ORBITE` | 3 | SSO × 2, LEO × 1 |
-| 02 | `SATELLITE` | 5 | 3 Opérationnels, 1 En veille, **1 Désorbité (SAT-005)** |
-| 03 | `INSTRUMENT` | 4 | Résolution NULL sur INS-AIS-01 |
-| 04 | `EMBARQUEMENT` | 7 | PK composite, états variés |
-| 05 | `CENTRE_CONTROLE` | 3 | Paris · Houston · Singapour |
-| 06 | `STATION_SOL` | 3 | **GS-SGP-01 en Maintenance** |
-| 07 | `AFFECTATION_STATION` | 3 | PK composite |
-| 08 | `MISSION` | 3 | 2 Actives, **1 Terminée (MSN-DEF-2022)** |
-| 09 | `FENETRE_COM` | 5 | 3 Réalisées, 2 Planifiées (volume NULL) |
-| 10 | `PARTICIPATION` | 7 | PK composite, rôles variés |
-
-> **Format CSV :** séparateur `;` · encodage UTF-8 BOM · valeurs NULL = cellule vide
-
----
-
-## ⚡ Cas limites à connaître
-
-Ces valeurs du jeu de données sont **intentionnellement là pour tester les contraintes**.
-
-- **SAT-005** (`Désorbité`) → doit déclencher ORA-20001 sur tout INSERT dans `FENETRE_COM`
-- **GS-SGP-01** (`Maintenance`) → doit déclencher ORA-20002 sur tout INSERT dans `FENETRE_COM`
-- **MSN-DEF-2022** (`Terminée`) → doit déclencher ORA-20004 sur tout INSERT dans `PARTICIPATION`
-- **INS-AIS-01** (`resolution = NULL`) → exploité dans les exercices NVL (Palier 2)
-- **Fenêtres 4 et 5** (`volume_donnees = NULL`) → vérifiées par le trigger T3
-
----
-
-## 🚀 Démarrage rapide — ALTN83
+### 1. Lancer la base de donnees Oracle
+Depuis la racine du projet :
 
 ```bash
-# 1. Connexion Oracle
-sqlplus NANOORBIT_ADMIN/[password]@FREEPDB1
-
-# 2. Créer le schéma (DDL — livrable L2-A)
-@chemin/vers/votre_DDL.sql
-
-# 3. Charger les données de référence
-@altn83-bdd/scripts/ALTN83_NanoOrbit_Phase2_DML.sql
-
-# 4. Vérifier
-SELECT table_name, num_rows FROM user_tables ORDER BY table_name;
+cd altn83-bdd
+docker compose up -d
 ```
 
----
+Le conteneur Oracle demarre sur `localhost:1521` et initialise automatiquement le schema `NO_ADMIN` avec les scripts SQL via le bootstrap :
+- `01-Phase2_DDL.sql`
+- `02-Phase2_DML.sql`
+- `03-Phase2_Triggers.sql`
+- `07-Phase3_pkg_nanoOrbit_SPEC.sql`
+- `06-Phase3_pkg_nanoOrbit_BODY.sql`
+- `09-Phase4_Exploitation_Avancee.sql`
+- `04-Phase2_Controle.sql`
 
-## 🚀 Démarrage rapide — ALTN82
+Le bootstrap est monte dans le conteneur et s'execute au demarrage de la base.
+
+Si besoin, on peut verifier les logs :
 
 ```bash
-# Cloner le dépôt
-git clone https://github.com/ntiacademy/nanoorbit.git
-
-# Ouvrir le projet starter dans Android Studio
-# File > Open > nanoorbit/altn82-android/starter/
+docker logs -f NanoOrbit_oracle_23ai
 ```
 
----
+### 2. Lancer l'API Node.js
+Depuis la racine du projet :
 
-## 📋 Conventions de nommage des livrables étudiants
-
+```bash
+cd api
+npm install
+npm run start
 ```
-# ALTN83
-GROUPE_NomA_NomB_NanoOrbit_Phase1.pdf
-GROUPE_NomA_NomB_NanoOrbit_Phase2.sql
-GROUPE_NomA_NomB_NanoOrbit_Phase3.sql
-GROUPE_NomA_NomB_NanoOrbit_Phase4.sql
 
-# ALTN82
-GROUPE_NomA_NomB_NanoOrbit_Android.zip
+L'API ecoute sur `http://localhost:3000`.
+
+### 3. Lancer l'application Android
+Ouvrir le projet suivant dans Android Studio :
+
+```text
+altn82-android/starter
 ```
+
+Ensuite :
+1. lancer un emulateur Android
+2. cliquer sur `Run`
+3. attendre le chargement du dashboard
+
+L'application Android pointe sur `http://10.0.2.2:3000/`, donc l'API doit tourner sur la machine hote.
+
+## Provoquer les trois modes de l'application
+
+### 1. Mode en ligne
+Conditions :
+- base de donnees allumee
+- API allumee
+- application ouverte
+
+Procedure :
+1. lancer `docker compose up -d` dans `altn83-bdd`
+2. lancer `npm run start` dans `api`
+3. ouvrir l'application
+4. faire un refresh
+
+Resultat attendu :
+- pas de banniere `Mode hors-ligne`
+- pas de banniere `Mode demonstration`
+- les donnees viennent de l'API
+
+### 2. Mode hors-ligne
+Conditions :
+- il faut d'abord avoir charge l'application au moins une fois avec l'API disponible
+- cela remplit le cache local Room
+
+Procedure :
+1. lancer la base et l'API
+2. ouvrir l'application
+3. faire un refresh sur le dashboard ou le planning
+4. fermer l'API
+5. relancer l'application ou refaire un refresh
+
+Resultat attendu :
+- banniere `Mode hors-ligne`
+- message du type `Mis a jour il y a ...`
+- les donnees viennent de Room
+
+### 3. Mode MockData
+Conditions :
+- l'API doit etre indisponible
+- le stockage de l'application doit etre vide
+
+Important :
+pour supprimer Room, il ne faut pas seulement vider le cache Android.  
+Il faut effacer les **donnees de l'application** (`Clear storage` / `Effacer les donnees`), sinon la base Room reste presente.
+
+Procedure :
+1. couper l'API
+2. effacer les donnees de l'application
+3. relancer l'application
+
+Resultat attendu :
+- banniere `Mode demonstration`
+- les donnees viennent de `MockData`
+
+## Comment effacer les donnees de l'application
+
+### Depuis l'emulateur Android
+1. ouvrir `Settings`
+2. aller dans `Apps`
+3. choisir `NanoOrbit`
+4. ouvrir `Storage & cache`
+5. cliquer sur `Clear storage` ou `Effacer les donnees`
+
+## Resume rapide
+
+### Mode en ligne
+- base ON
+- API ON
+- app ouverte
+
+### Mode hors-ligne
+- base ON ou OFF
+- API OFF
+- Room deja rempli
+
+### Mode MockData
+- API OFF
+- Room vide
+- donnees de l'application effacees
