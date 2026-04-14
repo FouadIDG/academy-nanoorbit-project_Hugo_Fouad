@@ -13,8 +13,10 @@ services:
     volumes:
       # Persistance des données (indispensable pour les TP)
       - nanoOrbit:/opt/oracle/oradata
-      # Optionnel : Vos scripts SQL de création (Séance 1)
-      - ./scripts:/opt/oracle/scripts/startup
+      # Scripts SQL sources montés en lecture seule
+      - ./scripts:/workspace/sql:ro
+      # Bootstrap relancé à chaque démarrage de la base
+      - ./bootstrap/00-run-bootstrap.sh:/container-entrypoint-startdb.d/00-run-bootstrap.sh:ro
 
 volumes:
   nanoOrbit:
