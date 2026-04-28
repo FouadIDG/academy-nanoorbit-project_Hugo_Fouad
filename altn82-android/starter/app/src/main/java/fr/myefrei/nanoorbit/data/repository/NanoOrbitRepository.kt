@@ -1,25 +1,31 @@
 package fr.myefrei.nanoorbit.data.repository
 
 import fr.myefrei.nanoorbit.data.api.NanoOrbitApi
-import fr.myefrei.nanoorbit.data.api.FenetreValidationRequest
+import fr.myefrei.nanoorbit.data.api.CreateFenetreRequest
 import fr.myefrei.nanoorbit.data.local.NanoOrbitDao
+import fr.myefrei.nanoorbit.data.local.PendingFenetreEntity
 import fr.myefrei.nanoorbit.data.local.toEntity
 import fr.myefrei.nanoorbit.data.local.toModel
 import fr.myefrei.nanoorbit.data.mock.MockData
 import fr.myefrei.nanoorbit.data.models.Orbite
 import fr.myefrei.nanoorbit.data.models.FenetreCom
+import fr.myefrei.nanoorbit.data.models.PendingFenetrePlanification
+import fr.myefrei.nanoorbit.data.models.PendingSyncStatus
 import fr.myefrei.nanoorbit.data.models.Satellite
 import fr.myefrei.nanoorbit.data.models.SatelliteInstrument
 import fr.myefrei.nanoorbit.data.models.SatelliteMissionAssignment
 import fr.myefrei.nanoorbit.data.models.StatutSatellite
+import fr.myefrei.nanoorbit.data.models.StatutStation
 import fr.myefrei.nanoorbit.data.models.StationSol
 import fr.myefrei.nanoorbit.data.preferences.FavoritesPreferences
 import java.io.IOException
 import java.time.Instant
+import java.time.LocalDateTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import retrofit2.HttpException
@@ -27,7 +33,8 @@ import retrofit2.HttpException
 class NanoOrbitRepository(
     private val dao: NanoOrbitDao? = null,
     private val favoritesPreferences: FavoritesPreferences? = null,
-    private val api: NanoOrbitApi? = null
+    private val api: NanoOrbitApi? = null,
+    private val schedulePendingSync: (() -> Unit)? = null
 ) {
     data class CacheFirstResult<T>(
         val data: T,
@@ -36,8 +43,30 @@ class NanoOrbitRepository(
         val lastUpdatedEpochMillis: Long?
     )
 
+    data class PlanificationResult(
+        val fenetre: FenetreCom?,
+        val queued: Boolean,
+        val message: String
+    )
+
+    data class PendingSyncResult(
+        val syncedCount: Int,
+        val failedCount: Int,
+        val hasTransientFailure: Boolean
+    )
+
     val favoriteSatelliteIds: Flow<Set<String>> =
         favoritesPreferences?.favoriteSatelliteIds ?: flowOf(emptySet())
+
+    val pendingFenetres: Flow<List<PendingFenetrePlanification>> =
+        dao?.observePendingFenetreEntities()
+            ?.map { entities -> entities.map { entity -> entity.toModel() } }
+            ?: flowOf(emptyList())
+
+    val cachedFenetres: Flow<List<FenetreCom>> =
+        dao?.observeFenetreEntities()
+            ?.map { entities -> entities.map { entity -> entity.toModel() } }
+            ?: flowOf(emptyList())
 
     suspend fun getOrbites(): List<Orbite> {
         delay(NETWORK_LATENCY_MS)
@@ -199,25 +228,39 @@ class NanoOrbitRepository(
     suspend fun planifierFenetre(
         satelliteId: String,
         codeStation: String,
-        dureeSecondes: Int
-    ): Result<Unit> {
+        datetimeDebut: LocalDateTime,
+        dureeSecondes: Int,
+        elevationMaxDegres: Double
+    ): Result<PlanificationResult> {
+        val request = CreateFenetreRequest(
+            satelliteId = satelliteId,
+            codeStation = codeStation,
+            datetimeDebut = datetimeDebut,
+            dureeSecondes = dureeSecondes,
+            elevationMaxDegres = elevationMaxDegres
+        )
+
+        validateFenetreLocally(
+            request = request,
+            checkOverlaps = false
+        ).onFailure { error ->
+            return Result.failure(error)
+        }
+
         api?.let { remoteApi ->
             return try {
-                val response = remoteApi.validateFenetre(
-                    FenetreValidationRequest(
-                        satelliteId = satelliteId,
-                        codeStation = codeStation,
-                        dureeSecondes = dureeSecondes
+                val fenetre = remoteApi.createFenetre(request)
+                persistSingleFenetre(fenetre)
+                Result.success(
+                    PlanificationResult(
+                        fenetre = fenetre,
+                        queued = false,
+                        message = "Fenêtre planifiée pour $satelliteId depuis $codeStation."
                     )
                 )
-                if (response.isValid) {
-                    Result.success(Unit)
-                } else {
-                    Result.failure(IllegalArgumentException(response.message))
-                }
             } catch (error: HttpException) {
                 if (isRemoteUnavailable(error)) {
-                    validateFenetreLocally(satelliteId, codeStation, dureeSecondes)
+                    queueFenetre(request)
                 } else {
                     Result.failure(
                         IllegalArgumentException(
@@ -229,21 +272,85 @@ class NanoOrbitRepository(
                     )
                 }
             } catch (error: IOException) {
-                validateFenetreLocally(satelliteId, codeStation, dureeSecondes)
+                queueFenetre(request)
             }
         }
 
-        return validateFenetreLocally(satelliteId, codeStation, dureeSecondes)
+        return queueFenetre(request)
     }
 
-    private fun validateFenetreLocally(
-        satelliteId: String,
-        codeStation: String,
-        dureeSecondes: Int
+    private suspend fun queueFenetre(
+        request: CreateFenetreRequest
+    ): Result<PlanificationResult> {
+        validateFenetreLocally(
+            request = request,
+            checkOverlaps = true
+        ).onFailure { error ->
+            return Result.failure(error)
+        }
+
+        val localId = withContext(Dispatchers.IO) {
+            dao?.insertPendingFenetreEntity(
+                PendingFenetreEntity(
+                    satelliteId = request.satelliteId,
+                    codeStation = request.codeStation,
+                    datetimeDebutIso = request.datetimeDebut.toString(),
+                    dureeSecondes = request.dureeSecondes,
+                    elevationMaxDegres = request.elevationMaxDegres,
+                    status = PendingSyncStatus.PENDING.name,
+                    createdAtEpochMillis = Instant.now().toEpochMilli(),
+                    lastError = null,
+                    retryCount = 0
+                )
+            )
+        }
+
+        if (localId == null) {
+            return Result.failure(
+                IllegalStateException(
+                    "Impossible de mettre la fenêtre en attente : cache local indisponible."
+                )
+            )
+        }
+
+        schedulePendingSync?.invoke()
+
+        return Result.success(
+            PlanificationResult(
+                fenetre = null,
+                queued = true,
+                message = "API indisponible : fenêtre mise en file d'attente."
+            )
+        )
+    }
+
+    private suspend fun validateFenetreLocally(
+        request: CreateFenetreRequest,
+        checkOverlaps: Boolean
     ): Result<Unit> {
-        val satellite = MockData.satellites.firstOrNull { item ->
-            item.idSatellite == satelliteId
-        } ?: return Result.failure(IllegalArgumentException("Satellite introuvable : $satelliteId"))
+        validateFenetreDuration(request.dureeSecondes).onFailure { error ->
+            return Result.failure(error)
+        }
+
+        if (request.elevationMaxDegres !in 0.0..90.0) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "Élévation invalide : elle doit être comprise entre 0 et 90 degrés."
+                )
+            )
+        }
+
+        val satellites = withContext(Dispatchers.IO) {
+            dao?.getSatelliteEntities()
+                ?.map { satelliteEntity -> satelliteEntity.toModel() }
+                .orEmpty()
+        }.ifEmpty { MockData.satellites }
+
+        val satellite = satellites.firstOrNull { item ->
+            item.idSatellite == request.satelliteId
+        } ?: return Result.failure(
+            IllegalArgumentException("Satellite introuvable : ${request.satelliteId}")
+        )
 
         if (satellite.statut == StatutSatellite.DESORBITE) {
             return Result.failure(
@@ -253,16 +360,24 @@ class NanoOrbitRepository(
             )
         }
 
-        val station = MockData.stationsByCode[codeStation]
-            ?: return Result.failure(IllegalArgumentException("Station introuvable : $codeStation"))
+        val station = MockData.stationsByCode[request.codeStation]
+            ?: return Result.failure(
+                IllegalArgumentException("Station introuvable : ${request.codeStation}")
+            )
 
-        if (station.statut != fr.myefrei.nanoorbit.data.models.StatutStation.ACTIVE) {
+        if (station.statut != StatutStation.ACTIVE) {
             return Result.failure(
                 IllegalArgumentException("Insertion refusée : la station est en maintenance.")
             )
         }
 
-        return validateFenetreDuration(dureeSecondes)
+        if (checkOverlaps) {
+            validateLocalOverlaps(request).onFailure { error ->
+                return Result.failure(error)
+            }
+        }
+
+        return Result.success(Unit)
     }
 
     suspend fun getFenetres(): CacheFirstResult<List<FenetreCom>> {
@@ -342,6 +457,161 @@ class NanoOrbitRepository(
         }
     }
 
+    suspend fun syncPendingFenetres(): PendingSyncResult {
+        val localDao = dao ?: return PendingSyncResult(
+            syncedCount = 0,
+            failedCount = 0,
+            hasTransientFailure = false
+        )
+        val remoteApi = api ?: return PendingSyncResult(
+            syncedCount = 0,
+            failedCount = 0,
+            hasTransientFailure = true
+        )
+
+        val pending = withContext(Dispatchers.IO) {
+            localDao.getPendingFenetreSyncCandidates()
+        }
+        var syncedCount = 0
+        var failedCount = 0
+        var hasTransientFailure = false
+
+        pending.forEach { entity ->
+            val request = CreateFenetreRequest(
+                satelliteId = entity.satelliteId,
+                codeStation = entity.codeStation,
+                datetimeDebut = LocalDateTime.parse(entity.datetimeDebutIso),
+                dureeSecondes = entity.dureeSecondes,
+                elevationMaxDegres = entity.elevationMaxDegres
+            )
+
+            try {
+                val fenetre = remoteApi.createFenetre(request)
+                persistSingleFenetre(fenetre)
+                withContext(Dispatchers.IO) {
+                    localDao.deletePendingFenetreEntity(entity.localId)
+                }
+                syncedCount += 1
+            } catch (error: HttpException) {
+                val message = parseApiErrorMessage(error.response()?.errorBody()?.string())
+                    ?: error.message()
+                if (error.code() in 400..499) {
+                    failedCount += 1
+                    withContext(Dispatchers.IO) {
+                        localDao.updatePendingFenetreStatus(
+                            localId = entity.localId,
+                            status = PendingSyncStatus.FAILED.name,
+                            lastError = message
+                        )
+                    }
+                } else {
+                    hasTransientFailure = true
+                    withContext(Dispatchers.IO) {
+                        localDao.updatePendingFenetreStatus(
+                            localId = entity.localId,
+                            status = PendingSyncStatus.PENDING.name,
+                            lastError = message
+                        )
+                    }
+                }
+            } catch (error: IOException) {
+                hasTransientFailure = true
+                withContext(Dispatchers.IO) {
+                    localDao.updatePendingFenetreStatus(
+                        localId = entity.localId,
+                        status = PendingSyncStatus.PENDING.name,
+                        lastError = error.message ?: "API indisponible."
+                    )
+                }
+            }
+        }
+
+        return PendingSyncResult(
+            syncedCount = syncedCount,
+            failedCount = failedCount,
+            hasTransientFailure = hasTransientFailure
+        )
+    }
+
+    private suspend fun validateLocalOverlaps(
+        request: CreateFenetreRequest
+    ): Result<Unit> {
+        val cachedFenetres = withContext(Dispatchers.IO) {
+            dao?.getFenetreEntities()
+                ?.map { fenetreEntity -> fenetreEntity.toModel() }
+                .orEmpty()
+        }.ifEmpty { MockData.fenetresCom }
+
+        val pendingFenetres = withContext(Dispatchers.IO) {
+            dao?.getPendingFenetreSyncCandidates().orEmpty()
+        }
+
+        val hasSatelliteOverlap = cachedFenetres.any { fenetre ->
+            fenetre.idSatellite == request.satelliteId &&
+                overlaps(
+                    startA = request.datetimeDebut,
+                    durationASeconds = request.dureeSecondes,
+                    startB = fenetre.datetimeDebut,
+                    durationBSeconds = fenetre.dureeSecondes
+                )
+        } || pendingFenetres.any { pending ->
+            pending.satelliteId == request.satelliteId &&
+                overlaps(
+                    startA = request.datetimeDebut,
+                    durationASeconds = request.dureeSecondes,
+                    startB = LocalDateTime.parse(pending.datetimeDebutIso),
+                    durationBSeconds = pending.dureeSecondes
+                )
+        }
+
+        if (hasSatelliteOverlap) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "Chevauchement temporel détecté pour le satellite."
+                )
+            )
+        }
+
+        val hasStationOverlap = cachedFenetres.any { fenetre ->
+            fenetre.codeStation == request.codeStation &&
+                overlaps(
+                    startA = request.datetimeDebut,
+                    durationASeconds = request.dureeSecondes,
+                    startB = fenetre.datetimeDebut,
+                    durationBSeconds = fenetre.dureeSecondes
+                )
+        } || pendingFenetres.any { pending ->
+            pending.codeStation == request.codeStation &&
+                overlaps(
+                    startA = request.datetimeDebut,
+                    durationASeconds = request.dureeSecondes,
+                    startB = LocalDateTime.parse(pending.datetimeDebutIso),
+                    durationBSeconds = pending.dureeSecondes
+                )
+        }
+
+        if (hasStationOverlap) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "Chevauchement temporel détecté pour la station."
+                )
+            )
+        }
+
+        return Result.success(Unit)
+    }
+
+    private fun overlaps(
+        startA: LocalDateTime,
+        durationASeconds: Int,
+        startB: LocalDateTime,
+        durationBSeconds: Int
+    ): Boolean {
+        val endA = startA.plusSeconds(durationASeconds.toLong())
+        val endB = startB.plusSeconds(durationBSeconds.toLong())
+        return startA.isBefore(endB) && endA.isAfter(startB)
+    }
+
     private suspend fun fetchSatellitesFromRemote(): List<Satellite> {
         delay(NETWORK_LATENCY_MS)
         return api?.getSatellites() ?: MockData.satellites
@@ -372,6 +642,15 @@ class NanoOrbitRepository(
             dao?.clearFenetres()
             dao?.upsertFenetreEntities(
                 fenetres.map { fenetre -> fenetre.toEntity(lastUpdatedEpochMillis = now) }
+            )
+        }
+    }
+
+    private suspend fun persistSingleFenetre(fenetre: FenetreCom) {
+        val now = Instant.now().toEpochMilli()
+        withContext(Dispatchers.IO) {
+            dao?.upsertFenetreEntities(
+                listOf(fenetre.toEntity(lastUpdatedEpochMillis = now))
             )
         }
     }

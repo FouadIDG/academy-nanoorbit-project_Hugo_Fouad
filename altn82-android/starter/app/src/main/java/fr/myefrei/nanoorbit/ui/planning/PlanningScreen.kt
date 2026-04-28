@@ -22,6 +22,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -29,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,12 +47,17 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.myefrei.nanoorbit.data.mock.MockData
 import fr.myefrei.nanoorbit.data.models.FenetreCom
+import fr.myefrei.nanoorbit.data.models.PendingSyncStatus
 import fr.myefrei.nanoorbit.data.models.Satellite
 import fr.myefrei.nanoorbit.data.models.StationSol
 import fr.myefrei.nanoorbit.ui.components.CacheStatusBanner
 import fr.myefrei.nanoorbit.ui.components.FenetreCard
 import fr.myefrei.nanoorbit.ui.theme.NanoOrbitTheme
 import fr.myefrei.nanoorbit.viewmodel.NanoOrbitViewModel
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun PlanningScreen(
@@ -68,6 +75,7 @@ fun PlanningScreen(
     val cacheAgeLabel by viewModel.fenetreCacheAgeLabel.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     val validationMessage by viewModel.planningValidationMessage.collectAsStateWithLifecycle()
+    val pendingFenetres by viewModel.pendingFenetres.collectAsStateWithLifecycle()
 
     PlanningContent(
         modifier = modifier.padding(contentPadding),
@@ -81,6 +89,8 @@ fun PlanningScreen(
         cacheAgeLabel = cacheAgeLabel,
         errorMessage = errorMessage,
         validationMessage = validationMessage,
+        pendingCount = pendingFenetres.count { item -> item.status == PendingSyncStatus.PENDING },
+        failedPendingCount = pendingFenetres.count { item -> item.status == PendingSyncStatus.FAILED },
         onStationFilterChange = viewModel::onStationFilterChange,
         onValidatePlanning = viewModel::validatePlanningRequest,
         onRetry = viewModel::refreshPlanning,
@@ -104,8 +114,10 @@ private fun PlanningContent(
     cacheAgeLabel: String?,
     errorMessage: String?,
     validationMessage: String?,
+    pendingCount: Int,
+    failedPendingCount: Int,
     onStationFilterChange: (String?) -> Unit,
-    onValidatePlanning: (String, String, Int) -> Unit,
+    onValidatePlanning: (String, String, LocalDateTime, Int, Double) -> Unit,
     onRetry: () -> Unit,
     onDismissMessages: () -> Unit,
     modifier: Modifier = Modifier
@@ -113,7 +125,26 @@ private fun PlanningContent(
     val totalDurationSeconds = fenetres.sumOf { fenetre -> fenetre.dureeSecondes }
     val totalVolumeMb = fenetres.sumOf { fenetre -> fenetre.volumeDonneesMb ?: 0.0 }
     var selectedSatelliteId by rememberSaveable { mutableStateOf("") }
+    var dateInput by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    var timeInput by rememberSaveable {
+        mutableStateOf(
+            LocalTime.now()
+                .plusMinutes(10)
+                .withSecond(0)
+                .withNano(0)
+                .format(DateTimeFormatter.ofPattern("HH:mm"))
+        )
+    }
     var dureeSecondesInput by rememberSaveable { mutableStateOf("300") }
+    var elevationMaxInput by rememberSaveable { mutableStateOf("60") }
+    var inputErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var isValidationSheetOpen by rememberSaveable { mutableStateOf(false) }
+    val validationSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val displayedErrorMessage = inputErrorMessage ?: errorMessage
+    val clearMessages = {
+        inputErrorMessage = null
+        onDismissMessages()
+    }
 
     LaunchedEffect(satellites) {
         if (selectedSatelliteId.isBlank() && satellites.isNotEmpty()) {
@@ -123,6 +154,11 @@ private fun PlanningContent(
 
     val stationNamesByCode = remember(stations) {
         stations.associate { station -> station.codeStation to station.nomStation }
+    }
+    val pendingLabel = when {
+        failedPendingCount > 0 -> " · $failedPendingCount en erreur"
+        pendingCount > 0 -> " · $pendingCount en attente"
+        else -> ""
     }
 
     Scaffold(
@@ -160,7 +196,7 @@ private fun PlanningContent(
                 }
 
                 Text(
-                    text = "${fenetres.size} fenêtre(s) · ${formatDuration(totalDurationSeconds)} · ${totalVolumeMb.toInt()} MB",
+                    text = "${fenetres.size} fenêtre(s) · ${formatDuration(totalDurationSeconds)} · ${totalVolumeMb.toInt()} MB$pendingLabel",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -184,34 +220,21 @@ private fun PlanningContent(
                     }
                 }
 
-                ValidationCard(
-                    satellites = satellites,
-                    stations = stations,
-                    selectedStationCode = selectedStationCode,
+                ValidationEntryPoint(
                     selectedSatelliteId = selectedSatelliteId,
+                    selectedStationCode = selectedStationCode,
+                    dateInput = dateInput,
+                    timeInput = timeInput,
                     dureeSecondesInput = dureeSecondesInput,
-                    errorMessage = errorMessage,
+                    errorMessage = displayedErrorMessage,
                     validationMessage = validationMessage,
-                    onSatelliteChange = { selectedSatelliteId = it },
-                    onDurationChange = { dureeSecondesInput = it },
-                    onValidatePlanning = {
-                        onDismissMessages()
-                        val stationCode = selectedStationCode ?: stations
-                            .firstOrNull()
-                            ?.codeStation
-                            .orEmpty()
-                        onValidatePlanning(
-                            selectedSatelliteId,
-                            stationCode,
-                            dureeSecondesInput.toIntOrNull() ?: 0
-                        )
-                    },
-                    onDismissMessages = onDismissMessages
+                    onOpenValidation = { isValidationSheetOpen = true },
+                    onDismissMessages = clearMessages
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                if (errorMessage != null && fenetres.isEmpty() && !isLoading) {
+                if (displayedErrorMessage != null && fenetres.isEmpty() && !isLoading) {
                     Button(onClick = onRetry) {
                         Text(text = "Réessayer")
                     }
@@ -235,6 +258,70 @@ private fun PlanningContent(
                     }
                 }
             }
+        }
+    }
+
+    if (isValidationSheetOpen) {
+        ModalBottomSheet(
+            onDismissRequest = { isValidationSheetOpen = false },
+            sheetState = validationSheetState
+        ) {
+            ValidationCard(
+                satellites = satellites,
+                stations = stations,
+                selectedStationCode = selectedStationCode,
+                selectedSatelliteId = selectedSatelliteId,
+                dateInput = dateInput,
+                timeInput = timeInput,
+                dureeSecondesInput = dureeSecondesInput,
+                elevationMaxInput = elevationMaxInput,
+                errorMessage = displayedErrorMessage,
+                validationMessage = validationMessage,
+                onSatelliteChange = { selectedSatelliteId = it },
+                onDateChange = { dateInput = it },
+                onTimeChange = { timeInput = it },
+                onDurationChange = { dureeSecondesInput = it },
+                onElevationChange = { elevationMaxInput = it },
+                onValidatePlanning = {
+                    clearMessages()
+                    val stationCode = selectedStationCode ?: stations
+                        .firstOrNull()
+                        ?.codeStation
+                        .orEmpty()
+                    val datetimeDebut = parsePlanningDateTime(dateInput, timeInput)
+                    val dureeSecondes = dureeSecondesInput.toIntOrNull()
+                    val elevationMax = elevationMaxInput.toDoubleOrNull()
+
+                    when {
+                        stationCode.isBlank() -> {
+                            inputErrorMessage = "Choisis une station avant de planifier."
+                        }
+                        selectedSatelliteId.isBlank() -> {
+                            inputErrorMessage = "Choisis un satellite avant de planifier."
+                        }
+                        datetimeDebut == null -> {
+                            inputErrorMessage = "Date ou heure invalide. Formats attendus : 2026-04-28 et 14:30."
+                        }
+                        dureeSecondes == null -> {
+                            inputErrorMessage = "Durée invalide : saisis un nombre de secondes."
+                        }
+                        elevationMax == null -> {
+                            inputErrorMessage = "Élévation invalide : saisis un nombre de degrés."
+                        }
+                        else -> {
+                            onValidatePlanning(
+                                selectedSatelliteId,
+                                stationCode,
+                                datetimeDebut,
+                                dureeSecondes,
+                                elevationMax
+                            )
+                        }
+                    }
+                },
+                onDismissMessages = clearMessages,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 32.dp)
+            )
         }
     }
 }
@@ -269,16 +356,128 @@ private fun StationFilterBar(
 }
 
 @Composable
+private fun ValidationEntryPoint(
+    selectedSatelliteId: String,
+    selectedStationCode: String?,
+    dateInput: String,
+    timeInput: String,
+    dureeSecondesInput: String,
+    errorMessage: String?,
+    validationMessage: String?,
+    onOpenValidation: () -> Unit,
+    onDismissMessages: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = "Nouvelle fenêtre",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${selectedSatelliteId.ifBlank { "Satellite" }} · ${selectedStationCode ?: "station"} · $dateInput $timeInput · ${dureeSecondesInput.ifBlank { "-" }} s",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Button(onClick = onOpenValidation) {
+                    Text(text = "Planifier")
+                }
+            }
+
+            validationMessage?.let { message ->
+                InlinePlanningMessage(
+                    message = message,
+                    isError = false,
+                    onDismiss = onDismissMessages
+                )
+            }
+
+            errorMessage?.let { message ->
+                InlinePlanningMessage(
+                    message = message,
+                    isError = true,
+                    onDismiss = onDismissMessages
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InlinePlanningMessage(
+    message: String,
+    isError: Boolean,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = if (isError) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            MaterialTheme.colorScheme.primaryContainer
+        },
+        contentColor = if (isError) {
+            MaterialTheme.colorScheme.onErrorContainer
+        } else {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        }
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall
+            )
+            TextButton(onClick = onDismiss) {
+                Text(text = "OK")
+            }
+        }
+    }
+}
+
+@Composable
 private fun ValidationCard(
     satellites: List<Satellite>,
     stations: List<StationSol>,
     selectedStationCode: String?,
     selectedSatelliteId: String,
+    dateInput: String,
+    timeInput: String,
     dureeSecondesInput: String,
+    elevationMaxInput: String,
     errorMessage: String?,
     validationMessage: String?,
     onSatelliteChange: (String) -> Unit,
+    onDateChange: (String) -> Unit,
+    onTimeChange: (String) -> Unit,
     onDurationChange: (String) -> Unit,
+    onElevationChange: (String) -> Unit,
     onValidatePlanning: () -> Unit,
     onDismissMessages: () -> Unit,
     modifier: Modifier = Modifier
@@ -293,7 +492,7 @@ private fun ValidationCard(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "Validation nouvelle fenêtre",
+                text = "Planifier une fenêtre",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -313,12 +512,41 @@ private fun ValidationCard(
                 }
             }
 
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = dateInput,
+                    onValueChange = onDateChange,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    label = { Text(text = "Date") },
+                    placeholder = { Text(text = "2026-04-28") }
+                )
+
+                OutlinedTextField(
+                    value = timeInput,
+                    onValueChange = onTimeChange,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    label = { Text(text = "Heure") },
+                    placeholder = { Text(text = "14:30") }
+                )
+            }
+
             OutlinedTextField(
                 value = dureeSecondesInput,
                 onValueChange = onDurationChange,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 label = { Text(text = "Durée en secondes [1, 900]") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+
+            OutlinedTextField(
+                value = elevationMaxInput,
+                onValueChange = onElevationChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text(text = "Élévation max en degrés [0, 90]") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
 
@@ -352,7 +580,7 @@ private fun ValidationCard(
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onValidatePlanning) {
-                    Text(text = "Vérifier")
+                    Text(text = "Planifier")
                 }
 
                 TextButton(onClick = onDismissMessages) {
@@ -373,6 +601,18 @@ private fun formatDuration(totalSeconds: Int): String {
     }
 }
 
+private fun parsePlanningDateTime(
+    dateInput: String,
+    timeInput: String
+): LocalDateTime? {
+    return runCatching {
+        LocalDateTime.of(
+            LocalDate.parse(dateInput.trim()),
+            LocalTime.parse(timeInput.trim())
+        )
+    }.getOrNull()
+}
+
 @Preview(showBackground = true)
 @Composable
 private fun PlanningContentPreview() {
@@ -387,9 +627,11 @@ private fun PlanningContentPreview() {
             isMockMode = false,
             cacheAgeLabel = "Mis à jour il y a 6 min",
             errorMessage = null,
-            validationMessage = "Fenêtre planifiable pour SAT-001 depuis GS-KIR-01.",
+            validationMessage = "Fenêtre planifiée pour SAT-001 depuis GS-KIR-01.",
+            pendingCount = 1,
+            failedPendingCount = 0,
             onStationFilterChange = {},
-            onValidatePlanning = { _, _, _ -> },
+            onValidatePlanning = { _, _, _, _, _ -> },
             onRetry = {},
             onDismissMessages = {}
         )

@@ -1,3 +1,4 @@
+import oracledb from 'oracledb';
 import { executeQuery } from '../database.js';
 import {
   mapFenetreCom,
@@ -13,6 +14,17 @@ import {
 
 const DATE_FORMAT = "YYYY-MM-DD";
 const TIMESTAMP_FORMAT = "YYYY-MM-DD\"T\"HH24:MI:SS";
+
+class HttpError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+function validationError(message) {
+  return new HttpError(422, message);
+}
 
 export async function getOrbites() {
   const result = await executeQuery(`
@@ -193,6 +205,33 @@ export async function getFenetres() {
   return result.rows.map(mapFenetreCom);
 }
 
+export async function getFenetreById(idFenetre) {
+  const result = await executeQuery(
+    `
+      SELECT
+        v.id_fenetre,
+        TO_CHAR(v.datetime_debut, '${TIMESTAMP_FORMAT}') AS datetime_debut,
+        v.debut_formate,
+        v.duree,
+        v.duree_formatee,
+        v.elevation_max,
+        v.volume_donnees,
+        v.statut_fenetre,
+        v.id_satellite,
+        v.nom_satellite,
+        v.code_station,
+        v.nom_station,
+        v.id_centre,
+        v.nom_centre
+      FROM v_fenetres_detail v
+      WHERE v.id_fenetre = :idFenetre
+    `,
+    { idFenetre }
+  );
+
+  return result.rows[0] ? mapFenetreCom(result.rows[0]) : null;
+}
+
 export async function getVolumesMensuels() {
   const result = await executeQuery(`
     SELECT
@@ -271,4 +310,121 @@ export async function validateFenetreRequest({
     isValid: true,
     message: `Fenêtre planifiable pour ${satelliteId} depuis ${codeStation}.`
   };
+}
+
+export async function createFenetre({
+  satelliteId,
+  codeStation,
+  datetimeDebut,
+  dureeSecondes,
+  elevationMaxDegres
+}) {
+  const normalizedDatetimeDebut = normalizeDatetimeInput(datetimeDebut);
+  if (!normalizedDatetimeDebut) {
+    throw validationError('datetimeDebut est obligatoire au format YYYY-MM-DDTHH:mm ou YYYY-MM-DDTHH:mm:ss.');
+  }
+
+  const elevation = Number(elevationMaxDegres);
+  if (!Number.isFinite(elevation) || elevation < 0 || elevation > 90) {
+    throw validationError('Élévation invalide : elle doit être comprise entre 0 et 90 degrés.');
+  }
+
+  const validation = await validateFenetreRequest({
+    satelliteId,
+    codeStation,
+    dureeSecondes
+  });
+  if (!validation.isValid) {
+    throw validationError(validation.message);
+  }
+
+  try {
+    const result = await executeQuery(
+      `
+        INSERT INTO fenetre_com (
+          datetime_debut,
+          duree,
+          elevation_max,
+          volume_donnees,
+          statut,
+          id_satellite,
+          code_station
+        ) VALUES (
+          TO_TIMESTAMP(:datetimeDebut, '${TIMESTAMP_FORMAT}'),
+          :dureeSecondes,
+          :elevationMaxDegres,
+          NULL,
+          'Planifiée',
+          :satelliteId,
+          :codeStation
+        )
+        RETURNING id_fenetre INTO :idFenetre
+      `,
+      {
+        datetimeDebut: normalizedDatetimeDebut,
+        dureeSecondes,
+        elevationMaxDegres: elevation,
+        satelliteId,
+        codeStation,
+        idFenetre: {
+          dir: oracledb.BIND_OUT,
+          type: oracledb.NUMBER
+        }
+      }
+    );
+
+    const idFenetre = result.outBinds.idFenetre[0];
+    const fenetre = await getFenetreById(idFenetre);
+    if (!fenetre) {
+      throw new Error(`Fenêtre créée mais introuvable : ${idFenetre}`);
+    }
+
+    return fenetre;
+  } catch (error) {
+    if (isOracleBusinessError(error)) {
+      throw validationError(extractOracleMessage(error));
+    }
+    throw error;
+  }
+}
+
+function normalizeDatetimeInput(value) {
+  if (typeof value !== 'string') return null;
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
+    return `${value}:00`;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) {
+    return value;
+  }
+
+  return null;
+}
+
+function isOracleBusinessError(error) {
+  const businessErrorNums = new Set([
+    1,
+    1400,
+    1438,
+    1722,
+    1830,
+    1843,
+    1847,
+    2290,
+    2291,
+    20001,
+    20002,
+    20003,
+    20004,
+    20005
+  ]);
+
+  return businessErrorNums.has(error.errorNum);
+}
+
+function extractOracleMessage(error) {
+  const message = error.message || 'Fenêtre refusée par Oracle.';
+  const match = message.match(/ORA-\d+:\s*([^\n\r]+)/);
+  return match?.[1] || message;
 }

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  createFenetre,
   getFenetres,
   getMissionStats,
   getOrbites,
@@ -111,6 +112,15 @@ router.post('/fenetres/validate', async (request, response, next) => {
   try {
     const result = await validateFenetreRequest(request.body);
     response.status(result.isValid ? 200 : 422).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/fenetres', async (request, response, next) => {
+  try {
+    const fenetre = await createFenetre(request.body);
+    response.status(201).json(fenetre);
   } catch (error) {
     next(error);
   }

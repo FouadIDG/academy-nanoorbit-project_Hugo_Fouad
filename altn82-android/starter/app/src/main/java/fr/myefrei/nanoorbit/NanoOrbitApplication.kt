@@ -7,6 +7,7 @@ import fr.myefrei.nanoorbit.data.preferences.FavoritesPreferences
 import fr.myefrei.nanoorbit.data.preferences.nanoOrbitDataStore
 import fr.myefrei.nanoorbit.data.repository.NanoOrbitRepository
 import fr.myefrei.nanoorbit.worker.CommunicationWindowNotificationWorker
+import fr.myefrei.nanoorbit.worker.PendingFenetreSyncWorker
 import org.osmdroid.config.Configuration
 
 class NanoOrbitApplication : Application() {
@@ -17,11 +18,13 @@ class NanoOrbitApplication : Application() {
         repository = NanoOrbitRepository(
             dao = NanoOrbitDatabase.getDatabase(this).nanoOrbitDao(),
             favoritesPreferences = FavoritesPreferences(nanoOrbitDataStore),
-            api = NanoOrbitApiClient.create()
+            api = NanoOrbitApiClient.create(),
+            schedulePendingSync = { PendingFenetreSyncWorker.enqueue(this) }
         )
 
         CommunicationWindowNotificationWorker.createNotificationChannel(this)
         CommunicationWindowNotificationWorker.schedulePeriodicChecks(this)
+        PendingFenetreSyncWorker.enqueue(this)
     }
 
     companion object {

@@ -12,9 +12,10 @@ app.use(router);
 
 app.use((error, _request, response, _next) => {
   console.error(error);
-  response.status(500).json({
-    message: 'Erreur interne API NanoOrbit',
-    details: error.message
+  const statusCode = error.statusCode || 500;
+  response.status(statusCode).json({
+    message: statusCode >= 500 ? 'Erreur interne API NanoOrbit' : error.message,
+    details: statusCode >= 500 ? error.message : undefined
   });
 });
 

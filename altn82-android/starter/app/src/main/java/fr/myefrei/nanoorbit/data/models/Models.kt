@@ -61,6 +61,11 @@ enum class StatutFenetre(val libelleOracle: String) {
     ANNULEE("Annulée")
 }
 
+enum class PendingSyncStatus {
+    PENDING,
+    FAILED
+}
+
 /**
  * Enum miroir de STATION_SOL.statut et du CHECK Oracle chk_station_statut.
  */
@@ -206,6 +211,19 @@ data class FenetreCom(
     val nomStation: String? = null,
     val idCentre: Int? = null,
     val nomCentre: String? = null
+)
+
+data class PendingFenetrePlanification(
+    val localId: Long,
+    val satelliteId: String,
+    val codeStation: String,
+    val datetimeDebut: LocalDateTime,
+    val dureeSecondes: Int,
+    val elevationMaxDegres: Double,
+    val status: PendingSyncStatus,
+    val createdAtEpochMillis: Long,
+    val lastError: String? = null,
+    val retryCount: Int = 0
 )
 
 /**

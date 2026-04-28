@@ -12,11 +12,14 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import fr.myefrei.nanoorbit.data.models.FenetreCom
 import fr.myefrei.nanoorbit.data.models.FormatCubeSat
+import fr.myefrei.nanoorbit.data.models.PendingFenetrePlanification
+import fr.myefrei.nanoorbit.data.models.PendingSyncStatus
 import fr.myefrei.nanoorbit.data.models.Satellite
 import fr.myefrei.nanoorbit.data.models.StatutFenetre
 import fr.myefrei.nanoorbit.data.models.StatutSatellite
 import java.time.LocalDate
 import java.time.LocalDateTime
+import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "satellites")
 data class SatelliteEntity(
@@ -53,6 +56,21 @@ data class FenetreEntity(
     val lastUpdatedEpochMillis: Long
 )
 
+@Entity(tableName = "pending_fenetres")
+data class PendingFenetreEntity(
+    @PrimaryKey(autoGenerate = true)
+    val localId: Long = 0,
+    val satelliteId: String,
+    val codeStation: String,
+    val datetimeDebutIso: String,
+    val dureeSecondes: Int,
+    val elevationMaxDegres: Double,
+    val status: String,
+    val createdAtEpochMillis: Long,
+    val lastError: String?,
+    val retryCount: Int
+)
+
 @Dao
 interface NanoOrbitDao {
     @Query("SELECT * FROM satellites ORDER BY idSatellite")
@@ -70,6 +88,9 @@ interface NanoOrbitDao {
     @Query("SELECT * FROM fenetres_com ORDER BY datetimeDebutIso")
     fun getFenetreEntities(): List<FenetreEntity>
 
+    @Query("SELECT * FROM fenetres_com ORDER BY datetimeDebutIso")
+    fun observeFenetreEntities(): Flow<List<FenetreEntity>>
+
     @Query("SELECT MAX(lastUpdatedEpochMillis) FROM fenetres_com")
     fun getFenetresLastUpdatedAt(): Long?
 
@@ -78,11 +99,42 @@ interface NanoOrbitDao {
 
     @Query("DELETE FROM fenetres_com")
     fun clearFenetres(): Int
+
+    @Query("SELECT * FROM pending_fenetres ORDER BY createdAtEpochMillis")
+    fun observePendingFenetreEntities(): Flow<List<PendingFenetreEntity>>
+
+    @Query("SELECT * FROM pending_fenetres WHERE status = 'PENDING' ORDER BY createdAtEpochMillis")
+    fun getPendingFenetreSyncCandidates(): List<PendingFenetreEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun insertPendingFenetreEntity(entity: PendingFenetreEntity): Long
+
+    @Query("DELETE FROM pending_fenetres WHERE localId = :localId")
+    fun deletePendingFenetreEntity(localId: Long): Int
+
+    @Query(
+        """
+        UPDATE pending_fenetres
+           SET status = :status,
+               lastError = :lastError,
+               retryCount = retryCount + 1
+         WHERE localId = :localId
+        """
+    )
+    fun updatePendingFenetreStatus(
+        localId: Long,
+        status: String,
+        lastError: String?
+    ): Int
 }
 
 @Database(
-    entities = [SatelliteEntity::class, FenetreEntity::class],
-    version = 2,
+    entities = [
+        SatelliteEntity::class,
+        FenetreEntity::class,
+        PendingFenetreEntity::class
+    ],
+    version = 3,
     exportSchema = false
 )
 abstract class NanoOrbitDatabase : RoomDatabase() {
@@ -171,5 +223,20 @@ fun FenetreEntity.toModel(): FenetreCom {
         nomStation = nomStation,
         idCentre = idCentre,
         nomCentre = nomCentre
+    )
+}
+
+fun PendingFenetreEntity.toModel(): PendingFenetrePlanification {
+    return PendingFenetrePlanification(
+        localId = localId,
+        satelliteId = satelliteId,
+        codeStation = codeStation,
+        datetimeDebut = LocalDateTime.parse(datetimeDebutIso),
+        dureeSecondes = dureeSecondes,
+        elevationMaxDegres = elevationMaxDegres,
+        status = PendingSyncStatus.valueOf(status),
+        createdAtEpochMillis = createdAtEpochMillis,
+        lastError = lastError,
+        retryCount = retryCount
     )
 }

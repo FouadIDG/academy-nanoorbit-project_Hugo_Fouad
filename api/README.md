@@ -33,6 +33,7 @@ et `mv_volumes_mensuels`.
 - `GET /missions/stats`
 - `GET /volumes/mensuels`
 - `POST /fenetres/validate`
+- `POST /fenetres`
 
 ## Validation d'une fenetre
 
@@ -40,4 +41,12 @@ et `mv_volumes_mensuels`.
 curl -X POST http://localhost:3000/fenetres/validate \
   -H "Content-Type: application/json" \
   -d '{"satelliteId":"SAT-001","codeStation":"GS-KIR-01","dureeSecondes":300}'
+```
+
+## Planification d'une fenetre
+
+```bash
+curl -X POST http://localhost:3000/fenetres \
+  -H "Content-Type: application/json" \
+  -d '{"satelliteId":"SAT-001","codeStation":"GS-KIR-01","datetimeDebut":"2026-04-28T14:30","dureeSecondes":300,"elevationMaxDegres":60}'
 ```

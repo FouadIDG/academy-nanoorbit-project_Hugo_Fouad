@@ -5,14 +5,18 @@ import androidx.lifecycle.viewModelScope
 import fr.myefrei.nanoorbit.NanoOrbitApplication
 import fr.myefrei.nanoorbit.data.models.FenetreCom
 import fr.myefrei.nanoorbit.data.models.Orbite
+import fr.myefrei.nanoorbit.data.models.PendingFenetrePlanification
+import fr.myefrei.nanoorbit.data.models.PendingSyncStatus
 import fr.myefrei.nanoorbit.data.models.Satellite
 import fr.myefrei.nanoorbit.data.models.SatelliteInstrument
 import fr.myefrei.nanoorbit.data.models.SatelliteMissionAssignment
+import fr.myefrei.nanoorbit.data.models.StatutFenetre
 import fr.myefrei.nanoorbit.data.models.StatutSatellite
 import fr.myefrei.nanoorbit.data.models.StationSol
 import fr.myefrei.nanoorbit.data.repository.NanoOrbitRepository
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.Period
 import java.time.ZoneId
 import kotlin.math.max
@@ -39,6 +43,11 @@ class NanoOrbitViewModel(
 
     private val _fenetres = MutableStateFlow<List<FenetreCom>>(emptyList())
     val fenetres: StateFlow<List<FenetreCom>> = _fenetres.asStateFlow()
+
+    private val _pendingFenetres =
+        MutableStateFlow<List<PendingFenetrePlanification>>(emptyList())
+    val pendingFenetres: StateFlow<List<PendingFenetrePlanification>> =
+        _pendingFenetres.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -135,9 +144,25 @@ class NanoOrbitViewModel(
 
     val filteredFenetres: StateFlow<List<FenetreCom>> = combine(
         _fenetres,
+        _pendingFenetres,
+        _satellites,
+        _stationsSol,
         _selectedStationCode
-    ) { fenetres, stationCode ->
-        fenetres
+    ) { fenetres, pendingFenetres, satellites, stations, stationCode ->
+        val satelliteNamesById = satellites.associate { satellite ->
+            satellite.idSatellite to satellite.nomSatellite
+        }
+        val stationNamesByCode = stations.associate { station ->
+            station.codeStation to station.nomStation
+        }
+        val queuedFenetres = pendingFenetres.map { pending ->
+            pending.toFenetreCom(
+                satelliteName = satelliteNamesById[pending.satelliteId],
+                stationName = stationNamesByCode[pending.codeStation]
+            )
+        }
+
+        (fenetres + queuedFenetres)
             .filter { fenetre ->
                 stationCode == null || fenetre.codeStation == stationCode
             }
@@ -154,6 +179,8 @@ class NanoOrbitViewModel(
         loadSatellites()
         loadFenetres()
         observeFavoriteSatellites()
+        observePendingFenetres()
+        observeCachedFenetres()
     }
 
     fun loadOrbites() {
@@ -271,16 +298,25 @@ class NanoOrbitViewModel(
     fun validatePlanningRequest(
         satelliteId: String,
         codeStation: String,
-        dureeSecondes: Int
+        datetimeDebut: LocalDateTime,
+        dureeSecondes: Int,
+        elevationMaxDegres: Double
     ) {
         viewModelScope.launch {
             repository.planifierFenetre(
                 satelliteId = satelliteId,
                 codeStation = codeStation,
-                dureeSecondes = dureeSecondes
-            ).onSuccess {
-                _planningValidationMessage.value =
-                    "Fenêtre planifiable pour $satelliteId depuis $codeStation."
+                datetimeDebut = datetimeDebut,
+                dureeSecondes = dureeSecondes,
+                elevationMaxDegres = elevationMaxDegres
+            ).onSuccess { result ->
+                result.fenetre?.let { fenetre ->
+                    _fenetres.update { current ->
+                        (current.filterNot { item -> item.idFenetre == fenetre.idFenetre } + fenetre)
+                            .sortedBy { item -> item.datetimeDebut }
+                    }
+                }
+                _planningValidationMessage.value = result.message
                 _errorMessage.value = null
             }.onFailure { error ->
                 _planningValidationMessage.value = null
@@ -342,5 +378,51 @@ class NanoOrbitViewModel(
                 _favoriteSatelliteIds.value = favorites
             }
         }
+    }
+
+    private fun observePendingFenetres() {
+        viewModelScope.launch {
+            repository.pendingFenetres.collect { pending ->
+                _pendingFenetres.value = pending
+            }
+        }
+    }
+
+    private fun observeCachedFenetres() {
+        viewModelScope.launch {
+            repository.cachedFenetres.collect { cached ->
+                if (cached.isNotEmpty()) {
+                    _fenetres.value = cached
+                }
+            }
+        }
+    }
+
+    private fun PendingFenetrePlanification.toFenetreCom(
+        satelliteName: String?,
+        stationName: String?
+    ): FenetreCom {
+        val negativeLocalId = -localId
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        val syncLabel = when (status) {
+            PendingSyncStatus.PENDING -> "En attente de synchronisation"
+            PendingSyncStatus.FAILED -> lastError?.let { "Échec synchro : $it" }
+                ?: "Échec de synchronisation"
+        }
+
+        return FenetreCom(
+            idFenetre = negativeLocalId,
+            datetimeDebut = datetimeDebut,
+            dureeSecondes = dureeSecondes,
+            elevationMaxDegres = elevationMaxDegres,
+            volumeDonneesMb = null,
+            statut = StatutFenetre.PLANIFIEE,
+            idSatellite = satelliteId,
+            nomSatellite = satelliteName,
+            codeStation = codeStation,
+            nomStation = stationName,
+            nomCentre = syncLabel
+        )
     }
 }

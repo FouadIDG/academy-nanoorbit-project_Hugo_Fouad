@@ -9,6 +9,7 @@ import fr.myefrei.nanoorbit.data.models.SatelliteMissionAssignment
 import fr.myefrei.nanoorbit.data.models.SatelliteOperationnelSummary
 import fr.myefrei.nanoorbit.data.models.StationSol
 import fr.myefrei.nanoorbit.data.models.VolumeMensuel
+import java.time.LocalDateTime
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
@@ -55,6 +56,11 @@ interface NanoOrbitApi {
     suspend fun validateFenetre(
         @Body request: FenetreValidationRequest
     ): FenetreValidationResponse
+
+    @POST("fenetres")
+    suspend fun createFenetre(
+        @Body request: CreateFenetreRequest
+    ): FenetreCom
 }
 
 data class FenetreValidationRequest(
@@ -66,4 +72,12 @@ data class FenetreValidationRequest(
 data class FenetreValidationResponse(
     val isValid: Boolean,
     val message: String
+)
+
+data class CreateFenetreRequest(
+    val satelliteId: String,
+    val codeStation: String,
+    val datetimeDebut: LocalDateTime,
+    val dureeSecondes: Int,
+    val elevationMaxDegres: Double
 )
