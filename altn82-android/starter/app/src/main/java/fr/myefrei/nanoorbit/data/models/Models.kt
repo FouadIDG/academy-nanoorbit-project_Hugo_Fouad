@@ -269,30 +269,6 @@ data class Mission(
 )
 
 /**
- * Vue V_STATS_MISSIONS
- */
-data class MissionStats(
-    val idMission: String,
-    val nomMission: String,
-    val statutMission: StatutMission,
-    val nbSatellites: Int,
-    val typesOrbitesRepresentes: String,
-    val volumeTotalTelechargeMb: Double
-)
-
-/**
- * Vue materialisee MV_VOLUMES_MENSUELS
- */
-data class VolumeMensuel(
-    val moisReference: LocalDate,
-    val idCentre: Int?,
-    val nomCentre: String?,
-    val typeSatellite: FormatCubeSat,
-    val nbFenetresRealisees: Int,
-    val volumeTotalMb: Double
-)
-
-/**
  * Table EMBARQUEMENT
  * - id_satellite -> idSatellite
  * - ref_instrument -> refInstrument

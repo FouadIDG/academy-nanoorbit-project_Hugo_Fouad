@@ -42,7 +42,6 @@ class NanoOrbitViewModel(
     val stationsSol: StateFlow<List<StationSol>> = _stationsSol.asStateFlow()
 
     private val _fenetres = MutableStateFlow<List<FenetreCom>>(emptyList())
-    val fenetres: StateFlow<List<FenetreCom>> = _fenetres.asStateFlow()
 
     private val _pendingFenetres =
         MutableStateFlow<List<PendingFenetrePlanification>>(emptyList())
@@ -289,12 +288,6 @@ class NanoOrbitViewModel(
         }
     }
 
-    fun validateFenetreDuration(dureeSecondes: Int): Boolean {
-        return repository.validateFenetreDuration(dureeSecondes)
-            .onFailure { error -> _errorMessage.value = error.message }
-            .isSuccess
-    }
-
     fun validatePlanningRequest(
         satelliteId: String,
         codeStation: String,
@@ -361,7 +354,7 @@ class NanoOrbitViewModel(
         val updatedAt = Instant.ofEpochMilli(lastUpdatedEpochMillis)
             .atZone(ZoneId.systemDefault())
             .toLocalDateTime()
-        val minutes = java.time.Duration.between(updatedAt, java.time.LocalDateTime.now())
+        val minutes = java.time.Duration.between(updatedAt, LocalDateTime.now())
             .toMinutes()
             .coerceAtLeast(0)
 
